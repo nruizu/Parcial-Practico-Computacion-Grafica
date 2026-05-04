@@ -6,10 +6,6 @@ using UnityEngine;
 
 using Random = UnityEngine.Random;
 
-/// <summary>
-/// Gestiona el estado físico y las visualizaciones de todas las pelotas.
-/// Coordina los jobs de movimiento, rebote y verificación de spawn.
-/// </summary>
 public class BallManager : MonoBehaviour
 {
     [SerializeField]
@@ -30,56 +26,66 @@ public class BallManager : MonoBehaviour
     [SerializeField, Min(0f)]
     float avoidSpawnRadius = 2f;
 
-    // Estado nativo de las pelotas (accesible por jobs de Burst)
-    NativeList<BallState> states;
+    [SerializeField, Range(0.01f, 1f)]
+    float fragmentSeparation = 0.6f;
 
-    // Visualizaciones correspondientes a cada estado
+    [SerializeField, Min(0f)]
+    float explosionStrength = 2f;
+
+    NativeList<BallState> states;
     List<BallVisualization> visualizations;
 
-    UpdateBallJob   updateBallJob;
-    BounceBallsJob  bounceBallsJob;
-    VerifySpawnJob  verifySpawnJob;
+    UpdateBallJob updateBallJob;
+    BounceBallsJob bounceBallsJob;
+    VerifySpawnJob verifySpawnJob;
+    HitJob hitJob;
 
     float cooldown, cooldownDuration;
     Area2D worldArea;
 
+    public NativeList<BallState> States => states;
+
     public void Initialize(Area2D area)
     {
         worldArea = area;
-        states        = new NativeList<BallState>(100, Allocator.Persistent);
+        states = new NativeList<BallState>(100, Allocator.Persistent);
         visualizations = new List<BallVisualization>(100);
-
         cooldown = cooldownDuration = startingCooldown;
 
-        // Configurar jobs con referencias a los datos compartidos
         updateBallJob = new UpdateBallJob
         {
-            balls     = states,
+            balls = states,
             worldArea = worldArea,
-            maxSpeed  = maxSpeed
+            maxSpeed = maxSpeed
         };
 
         bounceBallsJob = new BounceBallsJob
         {
-            balls          = states,
-            worldArea      = worldArea,
+            balls = states,
+            worldArea = worldArea,
             bounceStrength = bounceStrength
         };
 
         verifySpawnJob = new VerifySpawnJob
         {
-            balls       = states,
-            success     = new NativeReference<bool>(Allocator.Persistent),
-            worldArea   = worldArea,
-            radius      = BallState.radii[BallState.initialStage],
+            balls = states,
+            success = new NativeReference<bool>(Allocator.Persistent),
+            worldArea = worldArea,
+            radius = BallState.radii[BallState.initialStage],
             avoidRadius = avoidSpawnRadius
         };
+    }
+
+    public void SetupHitJob(ref HitJob job)
+    {
+        job.balls = states;
+        job.fragmentSeparation = fragmentSeparation;
+        job.explosionStrength = explosionStrength;
     }
 
     public void Dispose()
     {
         if (!states.IsCreated) return;
-
         foreach (var v in visualizations) v.Despawn();
         visualizations.Clear();
         states.Dispose();
@@ -94,9 +100,6 @@ public class BallManager : MonoBehaviour
         cooldown = cooldownDuration = startingCooldown;
     }
 
-    /// <summary>
-    /// Schedula el job de movimiento lineal. Retorna el handle para encadenar dependencias.
-    /// </summary>
     public JobHandle UpdateBalls(float dt)
     {
         cooldown -= dt;
@@ -104,66 +107,67 @@ public class BallManager : MonoBehaviour
         return updateBallJob.Schedule(default);
     }
 
-    /// <summary>
-    /// Completa los jobs pendientes, verifica colisiones de rebote y spawna pelotas si es necesario.
-    /// </summary>
-    public void ResolveBalls(JobHandle dependency)
+    public JobHandle ScheduleHitJob(HitJob job, JobHandle dependency)
     {
-        // Primero resolver rebotes entre pelotas
+        hitJob = job;
+        return hitJob.Schedule(dependency);
+    }
+
+    public void ResolveBalls(Vector2 avoidPosition, JobHandle dependency)
+    {
         dependency = bounceBallsJob.Schedule(dependency);
 
-        // Si toca spawnear, verificar posición válida en paralelo
         if (cooldown <= 0f)
         {
-            verifySpawnJob.position      = worldArea.RandomVector2;
-            verifySpawnJob.avoidPosition = float2.zero; // Sin jugador aún
+            verifySpawnJob.position = worldArea.RandomVector2;
+            verifySpawnJob.avoidPosition = avoidPosition;
             dependency = verifySpawnJob.Schedule(dependency);
         }
 
         dependency.Complete();
 
-        // Spawnear si hay posición válida
         if (cooldown <= 0f && verifySpawnJob.success.Value)
         {
             cooldown += cooldownDuration;
             cooldownDuration *= cooldownPersistence;
-
             states.Add(new BallState
             {
-                position     = verifySpawnJob.position,
-                velocity     = Random.insideUnitCircle * maxStartSpeed,
-                mass         = BallState.masses[BallState.initialStage],
-                radius       = 0f,
+                position = verifySpawnJob.position,
+                velocity = UnityEngine.Random.insideUnitCircle * maxStartSpeed,
+                mass = BallState.masses[BallState.initialStage],
+                radius = 0f,
                 targetRadius = BallState.radii[BallState.initialStage],
-                stage        = BallState.initialStage,
-                type         = Random.Range(0, ballPrefabs.Length),
-                alive        = true
+                stage = BallState.initialStage,
+                type = UnityEngine.Random.Range(0, ballPrefabs.Length),
+                alive = true
             });
         }
     }
 
-    /// <summary>
-    /// Sincroniza las visualizaciones con el estado físico, usando extrapolación para suavizar.
-    /// </summary>
     public void UpdateVisualization(float dtExtrapolated)
     {
-        // Agregar visualizaciones para pelotas nuevas
         for (int i = visualizations.Count; i < states.Length; i++)
-        {
             visualizations.Add(ballPrefabs[states[i].type].Spawn());
-        }
 
-        // Actualizar posición y escala de cada visualización
         for (int i = 0; i < visualizations.Count; i++)
         {
             BallState s = states[i];
-            visualizations[i].UpdateVisualization(
-                s.position + s.velocity * dtExtrapolated,
-                Mathf.Min(s.radius + dtExtrapolated, s.targetRadius)
-            );
+            if (s.alive)
+            {
+                visualizations[i].UpdateVisualization(
+                    s.position + s.velocity * dtExtrapolated,
+                    Mathf.Min(s.radius + dtExtrapolated, s.targetRadius));
+            }
+            else
+            {
+                int last = states.Length - 1;
+                states[i] = states[last];
+                states.Length -= 1;
+                visualizations[i].Despawn();
+                visualizations[i] = visualizations[last];
+                visualizations.RemoveAt(last);
+                i--;
+            }
         }
     }
-
-    // Propiedad pública para que otros sistemas accedan al estado de las pelotas
-    public NativeList<BallState> States => states;
 }
