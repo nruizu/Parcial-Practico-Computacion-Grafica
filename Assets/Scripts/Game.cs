@@ -16,12 +16,17 @@ public class Game : MonoBehaviour
     [SerializeField]
     BulletManager bulletManager;
 
+    [SerializeField]
+    Shader impactFlashShader;
+
     float dt;
     Area2D worldArea, playerArea;
     BallManager ballManager;
     Camera mainCamera;
     HitJob hitJob;
     bool isPlaying;
+
+    ImpactFlashController[] wallFlashControllers;
 
     void Awake()
     {
@@ -61,6 +66,7 @@ public class Game : MonoBehaviour
 
     void OnDisable()
     {
+        ballManager.CompleteAllJobs();
         ballManager.Dispose();
         bulletManager.Dispose();
         player.Dispose();
@@ -115,7 +121,21 @@ public class Game : MonoBehaviour
             bulletManager.UpdateBullets(fixedDt));
 
         handle = hitJob.Schedule(handle);
+        ballManager.SetLastJobHandle(handle);
+        
+        // ResolveBalls completa el job, LUEGO es seguro leer health
         ballManager.ResolveBalls(isPlaying ? player.Position : Vector2.zero, handle);
+        
+        // Ahora el job está completado y es seguro leer los valores
+        if (isPlaying && hitJob.health.Value <= 0)
+            TriggerWallFlash();
+    }
+
+    public void TriggerWallFlash()
+    {
+        if (wallFlashControllers == null) return;
+        foreach (var ctrl in wallFlashControllers)
+            ctrl.TriggerFlash();
     }
 
     Vector2 GetTargetPoint()
@@ -130,27 +150,41 @@ public class Game : MonoBehaviour
 
     void CreateWorldBounds()
     {
-        Material mat = new(Shader.Find("Universal Render Pipeline/Lit"));
-        mat.color = new Color(16f / 255f, 0f, 0f, 1f);
+        Shader shaderToUse = impactFlashShader != null
+            ? impactFlashShader
+            : Shader.Find("Universal Render Pipeline/Lit");
+
+        Material mat = new(shaderToUse);
+
+        if (mat.HasProperty("_BaseColor"))
+            mat.SetColor("_BaseColor", new Color(16f / 255f, 0f, 0f, 1f));
+        else
+            mat.color = new Color(16f / 255f, 0f, 0f, 1f);
+
         Transform parent = new GameObject("WorldBounds").transform;
         parent.SetParent(transform);
+
         float ex = worldArea.extents.x;
         float ey = worldArea.extents.y;
-        float r = worldBoundsRadius;
-        SpawnBound("Top",    parent, mat, new Vector3(0f,  ey, 0f), new Vector3(ex, r, r) * 2f);
-        SpawnBound("Bottom", parent, mat, new Vector3(0f, -ey, 0f), new Vector3(ex, r, r) * 2f);
-        SpawnBound("Left",   parent, mat, new Vector3(-ex, 0f, 0f), new Vector3(r, ey, r) * 2f);
-        SpawnBound("Right",  parent, mat, new Vector3( ex, 0f, 0f), new Vector3(r, ey, r) * 2f);
+        float r  = worldBoundsRadius;
+
+        wallFlashControllers = new ImpactFlashController[4];
+        wallFlashControllers[0] = SpawnBound("Top",    parent, mat, new Vector3(0f,  ey, 0f), new Vector3(ex, r, r) * 2f);
+        wallFlashControllers[1] = SpawnBound("Bottom", parent, mat, new Vector3(0f, -ey, 0f), new Vector3(ex, r, r) * 2f);
+        wallFlashControllers[2] = SpawnBound("Left",   parent, mat, new Vector3(-ex, 0f, 0f), new Vector3(r, ey, r) * 2f);
+        wallFlashControllers[3] = SpawnBound("Right",  parent, mat, new Vector3( ex, 0f, 0f), new Vector3(r, ey, r) * 2f);
     }
 
-    static void SpawnBound(string name, Transform parent, Material mat, Vector3 pos, Vector3 scale)
+    static ImpactFlashController SpawnBound(
+        string name, Transform parent, Material mat, Vector3 pos, Vector3 scale)
     {
         GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cube);
         go.name = name;
         Destroy(go.GetComponent<Collider>());
         go.transform.SetParent(parent);
         go.transform.localPosition = pos;
-        go.transform.localScale = scale;
+        go.transform.localScale    = scale;
         go.GetComponent<MeshRenderer>().sharedMaterial = mat;
+        return go.AddComponent<ImpactFlashController>();
     }
 }

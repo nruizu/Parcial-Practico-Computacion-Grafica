@@ -9,6 +9,12 @@ public class BulletManager : MonoBehaviour
     [SerializeField]
     BulletVisualization bulletPrefab;
 
+    [SerializeField]
+    ParticleSystem explosionParticleSystem;
+
+    [SerializeField, Min(0)]
+    int explosionParticleCount = 50;
+
     [SerializeField, Min(0f)]
     float speed = 12f, startLifetime = 1f;
 
@@ -39,7 +45,11 @@ public class BulletManager : MonoBehaviour
     public void Dispose()
     {
         if (!states.IsCreated) return;
-        StopAllCoroutines();
+
+        // Verificar que el objeto no está siendo destruido antes de parar corrutinas
+        if (this != null && gameObject != null)
+            StopAllCoroutines();
+
         foreach (var v in visualizations) v.Despawn();
         visualizations.Clear();
         states.Dispose();
@@ -73,11 +83,9 @@ public class BulletManager : MonoBehaviour
         BulletVisualization vis = bulletPrefab.Spawn(rotation);
         visualizations.Add(vis);
 
-        // Corrutina que gestiona el ciclo de vida de esta bala
         StartCoroutine(BulletLifetimeCoroutine(index));
     }
 
-    // Corrutina que espera el lifetime y luego marca la bala para eliminación
     IEnumerator BulletLifetimeCoroutine(int index)
     {
         yield return new WaitForSeconds(startLifetime);
@@ -106,6 +114,18 @@ public class BulletManager : MonoBehaviour
             }
             else
             {
+                if (state.exploded && explosionParticleSystem != null)
+                {
+                    explosionParticleSystem.Emit(
+                        new ParticleSystem.EmitParams
+                        {
+                            position = new Vector3(state.position.x, state.position.y, 0f),
+                            applyShapeToPosition = true
+                        },
+                        explosionParticleCount
+                    );
+                }
+
                 int last = states.Length - 1;
                 states[i] = states[last];
                 states.Length -= 1;

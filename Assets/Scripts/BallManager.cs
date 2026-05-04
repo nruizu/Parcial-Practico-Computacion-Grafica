@@ -42,6 +42,7 @@ public class BallManager : MonoBehaviour
 
     float cooldown, cooldownDuration;
     Area2D worldArea;
+    JobHandle lastHandle;
 
     public NativeList<BallState> States => states;
 
@@ -83,6 +84,22 @@ public class BallManager : MonoBehaviour
         job.explosionStrength = explosionStrength;
     }
 
+    /// <summary>
+    /// Completa todos los jobs pendientes. DEBE llamarse antes de Dispose().
+    /// </summary>
+    public void CompleteAllJobs()
+    {
+        lastHandle.Complete();
+    }
+
+    /// <summary>
+    /// Guarda el handle del job más reciente (HitJob) para completarlo en OnDisable.
+    /// </summary>
+    public void SetLastJobHandle(JobHandle handle)
+    {
+        lastHandle = handle;
+    }
+
     public void Dispose()
     {
         if (!states.IsCreated) return;
@@ -104,7 +121,8 @@ public class BallManager : MonoBehaviour
     {
         cooldown -= dt;
         bounceBallsJob.dt = updateBallJob.dt = dt;
-        return updateBallJob.Schedule(default);
+        lastHandle = updateBallJob.Schedule(default);
+        return lastHandle;
     }
 
     public JobHandle ScheduleHitJob(HitJob job, JobHandle dependency)
@@ -115,6 +133,7 @@ public class BallManager : MonoBehaviour
 
     public void ResolveBalls(Vector2 avoidPosition, JobHandle dependency)
     {
+        lastHandle = dependency;
         dependency = bounceBallsJob.Schedule(dependency);
 
         if (cooldown <= 0f)
@@ -125,6 +144,7 @@ public class BallManager : MonoBehaviour
         }
 
         dependency.Complete();
+        lastHandle = dependency;
 
         if (cooldown <= 0f && verifySpawnJob.success.Value)
         {

@@ -769,6 +769,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::BulletManager
   bulletPrefab: {fileID: 6275718334837487136, guid: 6bd13586adfb92149a19b8e1b128f41d, type: 3}
+  explosionParticleSystem: {fileID: 0}
+  explosionParticleCount: 50
   speed: 12
   startLifetime: 1
   radius: 0.15
@@ -846,6 +848,7 @@ MonoBehaviour:
   worldBoundsRadius: 1.24
   player: {fileID: 386237028}
   bulletManager: {fileID: 611385025}
+  impactFlashShader: {fileID: 4800000, guid: 905b177d1342db94496c8bbe67c31360, type: 3}
 --- !u!4 &648362037
 Transform:
   m_ObjectHideFlags: 0
