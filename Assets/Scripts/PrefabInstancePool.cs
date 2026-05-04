@@ -3,43 +3,34 @@ using UnityEngine;
 
 public struct PrefabInstancePool<T> where T : MonoBehaviour
 {
-	Stack<T> pool;
+    Stack<T> pool;
 
-	public T GetInstance(T prefab)
-	{
-		if (pool == null)
-		{
-			pool = new();
-		}
-
+    public T GetInstance(T prefab)
+    {
+        if (pool == null)
+            pool = new();
 #if UNITY_EDITOR
-		else if (pool.TryPeek(out T i) && !i)
-		{
-			pool.Clear();
-		}
+        else if (pool.TryPeek(out T i) && !i)
+            pool.Clear();
 #endif
+        if (pool.TryPop(out T instance))
+            instance.gameObject.SetActive(true);
+        else
+            instance = Object.Instantiate(prefab);
 
-		if (pool.TryPop(out T instance))
-		{
-			instance.gameObject.SetActive(true);
-		}
-		else
-		{
-			instance = Object.Instantiate(prefab);
-		}
-		return instance;
-	}
+        return instance;
+    }
 
-	public void Recycle(T instance)
-	{
+    public void Recycle(T instance)
+    {
 #if UNITY_EDITOR
-		if (pool == null)
-		{
-			Object.Destroy(instance.gameObject);
-			return;
-		}
+        if (pool == null || instance == null || !instance)
+        {
+            if (instance != null && instance) Object.Destroy(instance.gameObject);
+            return;
+        }
 #endif
-		pool.Push(instance);
-		instance.gameObject.SetActive(false);
-	}
+        pool.Push(instance);
+        instance.gameObject.SetActive(false);
+    }
 }
